@@ -1,9 +1,6 @@
 import json
 import logging
 import time
-import pkg_resources
-
-import validictory
 
 from argparse import ArgumentParser
 
@@ -61,16 +58,6 @@ def _parseArgs():
 
     options = parser.parse_args()
 
-    with pkg_resources.resource_stream(__name__,
-                                       "ws_server_config_schema.json") as configSchema:
-
-        try:
-            validictory.validate(json.load(options.module_configs), json.load(configSchema))
-        except validictory.ValidationError as exc:
-            logging.exception("JSON schema validation of --conf file failed")
-            parser.error("JSON schema validation of --conf file failed: {}"
-                         .format(exc))
-
     return _Options(config=options.config, log_level=options.log_level)
 
 
@@ -81,7 +68,10 @@ def run(config, log_level):
 
     with open(config, 'rb') as f:
         config = json.load(f)
-        server = WebsocketServer(config)
+        server = WebsocketServer(ws_server_port=config['ws_server_port'],
+                                 rabbitmq_address=config['rabbitmq_address'],
+                                 rabbitmq_user=config['rabbitmq_address'],
+                                 rabbitmq_pwd=config['rabbitmq_pwd'])
         try:
             server.start()
             while 1:
