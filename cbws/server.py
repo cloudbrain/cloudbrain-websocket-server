@@ -6,7 +6,7 @@ from collections import defaultdict
 from sockjs.tornado.conn import SockJSConnection
 from sockjs.tornado import SockJSRouter
 from tornado.ioloop import IOLoop
-from tornado.web import RequestHandler, Application
+from tornado.web import Application
 
 from uuid import uuid4
 
