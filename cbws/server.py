@@ -51,14 +51,14 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user, rabbitmq_pwd)
                     record["device_name"] = device_name
                     record["metric"] = metric
 
-                    # TODO: replace by better interpolation rather that dumping packets
-                    total_records = self.subscribers[device_id][device_name][metric][
-                        "total_records"]
-                    ds_factor = self.subscribers[device_id][device_name][metric][
-                        "downsampling_factor"]
-                    if total_records % ds_factor == 0:
-                        self.send(json.dumps(record))
-
+                    self.send(json.dumps(record))
+                    # # TODO: replace by better interpolation rather that dumping packets
+                    # total_records = self.subscribers[device_id][device_name][metric][
+                    #     "total_records"]
+                    # ds_factor = self.subscribers[device_id][device_name][metric][
+                    #     "downsampling_factor"]
+                    # if total_records % ds_factor == 0:
+                    #     self.send(json.dumps(record))
 
             return send_probe
 
@@ -295,3 +295,7 @@ class WebsocketServer(object):
 
         # 4. Start IOLoop
         IOLoop.instance().start()
+
+
+    def stop(self):
+        IOLoop.instance().stop()

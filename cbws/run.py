@@ -44,9 +44,7 @@ def _parseArgs():
         "--conf",
         type=str,
         dest="config",
-        required=False,
-        default='conf/ws_server_config.json',
-        help="OPTIONAL: path to JSON config file.")
+        help="REQUIRED: path to JSON config file.")
 
     parser.add_argument(
         "--log",
