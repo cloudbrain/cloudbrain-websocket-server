@@ -13,7 +13,7 @@ python setup.py develop --user
 
 ## Run
 ```
-python cwbs/run.py --conf /path/to/conf.json
+python cbws/run.py --conf /path/to/conf.json
 ```
 
 See [default config file](https://github.com/cloudbrain/cloudbrain-websocket-server/blob/master/cbws/conf/ws_server_config.json)
