@@ -1,6 +1,8 @@
 import pika
 import json
 import logging
+import os
+
 
 from collections import defaultdict
 from sockjs.tornado.conn import SockJSConnection
@@ -189,12 +191,13 @@ class TornadoSubscriber(object):
 
 
     def connect(self):
-        auth = CloudbrainAuth()
+        auth_url = os.environ.get("AUTH_URL", None)
+        auth = CloudbrainAuth(base_url=auth_url)
         if self.token:
             credentials = pika.PlainCredentials(self.token, '')
             vhost = auth.get_vhost_by_token(self.token)
             connection_params = pika.ConnectionParameters(
-                host='dockerhost', virtual_host=vhost, credentials=credentials)
+                host=self.rabbitmq_address, virtual_host=vhost, credentials=credentials)
         else:
             credentials = pika.PlainCredentials(self.rabbitmq_user, self.rabbitmq_pwd)
             vhost = getattr(self, 'rabbitmq_vhost', auth.get_vhost_by_username(self.rabbitmq_user))
