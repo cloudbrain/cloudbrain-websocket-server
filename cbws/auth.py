@@ -18,17 +18,32 @@ class CloudbrainAuth(object):
         response = requests.get(token_url, headers=headers, verify=False)
         return response.json()
 
-    def vhost_info(self, token=None):
-        token_url = self.base_url + '/rabbitmq/vhost/info'
+    def vhost_by_token(self, token=None):
+        info_url = self.base_url + '/rabbitmq/vhost/info'
         token = token or self.token
 
         headers = {
           'Authorization': 'Bearer %s' % token
         }
 
-        response = requests.get(token_url, headers=headers, verify=False)
+        response = requests.get(info_url, headers=headers, verify=False)
         return response.json()
 
-    def get_vhost(self, token):
-        response = self.vhost_info(token)
+    def vhost_by_username(self, username=None):
+        info_url = self.base_url + '/rabbitmq/vhost/info'
+
+        headers = {}
+        body = {
+            "username": username
+        }
+
+        response = requests.post(info_url, data=body, headers=headers, verify=False)
+        return response.json()
+
+    def get_vhost_by_token(self, token):
+        response = self.vhost_by_token(token=token)
+        return response['vhost']
+
+    def get_vhost_by_username(self, username):
+        response = self.vhost_by_username(username=username)
         return response['vhost']

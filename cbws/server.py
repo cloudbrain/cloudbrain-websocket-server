@@ -98,7 +98,7 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user, rabbitmq_pwd)
             device_name = stream_configuration['deviceName']
             device_id = stream_configuration['deviceId']
             metric = stream_configuration['metric']
-            token = stream_configuration['token']
+            token = stream_configuration['token'] if 'token' in stream_configuration else None
             downsampling_factor = stream_configuration.get('downsampling_factor', 16)
             subscriber_id = str(uuid4())
 
@@ -189,16 +189,17 @@ class TornadoSubscriber(object):
 
 
     def connect(self):
+        auth = CloudbrainAuth()
         if self.token:
             credentials = pika.PlainCredentials(self.token, '')
-            auth = CloudbrainAuth()
-            vhost = auth.get_vhost(self.token)
+            vhost = auth.get_vhost_by_token(self.token)
             connection_params = pika.ConnectionParameters(
                 host='dockerhost', virtual_host=vhost, credentials=credentials)
         else:
             credentials = pika.PlainCredentials(self.rabbitmq_user, self.rabbitmq_pwd)
+            vhost = getattr(self, 'rabbitmq_vhost', auth.get_vhost_by_username(self.rabbitmq_user))
             connection_params = pika.ConnectionParameters(
-                host=self.rabbitmq_address, credentials=credentials)
+                host=self.rabbitmq_address, virtual_host=vhost, credentials=credentials)
         self.connection = pika.adapters.tornado_connection.TornadoConnection(
             connection_params,
             self.on_connected,
