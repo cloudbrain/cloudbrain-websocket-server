@@ -12,7 +12,7 @@ from tornado.web import Application
 
 from uuid import uuid4
 
-from cbws.auth import CloudbrainAuth
+from cloudbrain.core.auth import CloudbrainAuth
 
 _LOGGER = logging.getLogger()
 _LOGGER.setLevel(logging.INFO)
