@@ -1,6 +1,8 @@
 import pika
 import json
 import logging
+import os
+
 
 from collections import defaultdict
 from sockjs.tornado.conn import SockJSConnection
@@ -9,6 +11,8 @@ from tornado.ioloop import IOLoop
 from tornado.web import Application
 
 from uuid import uuid4
+
+from cloudbrain.core.auth import CloudbrainAuth
 
 _LOGGER = logging.getLogger()
 _LOGGER.setLevel(logging.INFO)
@@ -96,6 +100,7 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user, rabbitmq_pwd)
             device_name = stream_configuration['deviceName']
             device_id = stream_configuration['deviceId']
             metric = stream_configuration['metric']
+            token = stream_configuration['token'] if 'token' in stream_configuration else None
             downsampling_factor = stream_configuration.get('downsampling_factor', 16)
             subscriber_id = str(uuid4())
 
@@ -109,7 +114,9 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user, rabbitmq_pwd)
                         rabbitmq_user=rabbitmq_user,
                         rabbitmq_pwd=rabbitmq_pwd,
                         metric_name=metric,
-                        queue_name=subscriber_id),
+                        queue_name=subscriber_id,
+                        token=token,
+                        ),
                     "downsampling_factor": downsampling_factor,
                     "total_records": 0
                 }
@@ -165,7 +172,7 @@ class TornadoSubscriber(object):
 
 
     def __init__(self, callback, device_name, device_id, rabbitmq_address, rabbitmq_user,
-                 rabbitmq_pwd, metric_name, queue_name):
+                 rabbitmq_pwd, metric_name, queue_name, token=None):
         self.callback = callback
         self.device_name = device_name
         self.device_id = device_id
@@ -178,15 +185,26 @@ class TornadoSubscriber(object):
         self.rabbitmq_user = rabbitmq_user
         self.rabbitmq_pwd = rabbitmq_pwd
         self.queue_name = queue_name
+        self.token = token
 
         self.consumer_tag = None
 
 
     def connect(self):
-        credentials = pika.PlainCredentials('cloudbrain', 'cloudbrain')
+        auth_url = os.environ.get("AUTH_URL", None)
+        auth = CloudbrainAuth(base_url=auth_url)
+        if self.token:
+            credentials = pika.PlainCredentials(self.token, '')
+            vhost = auth.get_vhost_by_token(self.token)
+            connection_params = pika.ConnectionParameters(
+                host=self.rabbitmq_address, virtual_host=vhost, credentials=credentials)
+        else:
+            credentials = pika.PlainCredentials(self.rabbitmq_user, self.rabbitmq_pwd)
+            vhost = getattr(self, 'rabbitmq_vhost', auth.get_vhost_by_username(self.rabbitmq_user))
+            connection_params = pika.ConnectionParameters(
+                host=self.rabbitmq_address, virtual_host=vhost, credentials=credentials)
         self.connection = pika.adapters.tornado_connection.TornadoConnection(
-            pika.ConnectionParameters(
-                host=self.rabbitmq_address, credentials=credentials),
+            connection_params,
             self.on_connected,
             stop_ioloop_on_close=False,
             custom_ioloop=IOLoop.instance())
