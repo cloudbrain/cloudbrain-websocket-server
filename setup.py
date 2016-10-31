@@ -13,7 +13,7 @@ def findRequirements():
 
 
 setup(name="cwbs",
-      version="0.0.1",
+      version="0.1.0",
       description="CloudBrain websocket server",
       author="Alessio Della Motta, Marion Le Borgne, William Wnekowicz",
       url="https://github.com/cloudbrain/cloudbrain-websocket-server",
