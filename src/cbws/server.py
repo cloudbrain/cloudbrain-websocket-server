@@ -87,8 +87,6 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user,
             metric = stream_configuration['metric']
             token = (stream_configuration['token']
                      if 'token' in stream_configuration else None)
-            downsampling_factor = stream_configuration.get(
-                'downsampling_factor', 16)
             subscriber_id = str(uuid4())
 
             if not self.metric_exists(device_name, metric):
@@ -103,7 +101,6 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user,
                         queue_name=subscriber_id,
                         token=token
                     ),
-                    "downsampling_factor": downsampling_factor,
                     "total_records": 0
                 }
 
