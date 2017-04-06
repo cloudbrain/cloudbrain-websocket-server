@@ -56,10 +56,6 @@ def _parseArgs():
 
     options = parser.parse_args()
 
-    if options.conf_file is None:
-        raise ValueError("Module configuration must be provided with the "
-                         "--file flag.")
-
     return _Options(conf_file=options.conf_file, log_level=options.log_level)
 
 
