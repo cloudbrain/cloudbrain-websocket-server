@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+import os
 
 from argparse import ArgumentParser
 
@@ -62,21 +63,30 @@ def _parseArgs():
     return _Options(conf_file=options.conf_file, log_level=options.log_level)
 
 
-def run(config, log_level):
+def run(config_file, log_level):
+
     logging.basicConfig(level=log_level)
 
-    with open(config, 'rb') as f:
-        config = json.load(f)
-        server = WebsocketServer(ws_server_port=config['ws_server_port'],
-                                 rabbitmq_address=config['rabbitmq_address'],
-                                 rabbitmq_user=config['rabbitmq_address'],
-                                 rabbitmq_pwd=config['rabbitmq_pwd'])
-        try:
-            server.start()
-            while 1:
-                time.sleep(0.1)
-        except KeyboardInterrupt:
-            server.stop()
+    config = {}
+    if config_file:
+        with open(config_file, 'rb') as f:
+            config = json.load(f)
+    
+    port = os.environ.get("PORT", None) or config['ws_server_port']
+    rabbitmq_address = os.environ.get("RABBITMQ_ADDRESS", None) or config['rabbitmq_address']
+    rabbitmq_user = os.environ.get("RABBITMQ_USER", None) or config['rabbitmq_user']
+    rabbitmq_pwd = os.environ.get("RABBITMQ_PWD", None) or config['rabbitmq_pwd']
+
+    server = WebsocketServer(ws_server_port=port,
+                             rabbitmq_address=rabbitmq_address,
+                             rabbitmq_user=rabbitmq_user,
+                             rabbitmq_pwd=rabbitmq_pwd)
+    try:
+        server.start()
+        while 1:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        server.stop()
 
 
 def main():

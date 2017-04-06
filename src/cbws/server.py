@@ -1,6 +1,7 @@
 import pika
 import json
 import logging
+import os
 
 from collections import defaultdict
 from sockjs.tornado.conn import SockJSConnection
@@ -9,6 +10,8 @@ from tornado.ioloop import IOLoop
 from tornado.web import Application
 
 from uuid import uuid4
+
+from cloudbrain.core.auth import CloudbrainAuth
 
 _LOGGER = logging.getLogger()
 _LOGGER.setLevel(logging.INFO)
@@ -37,16 +40,14 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user,
             self.subscribers = recursivedict()
             self.total_records = recursivedict()
 
-        def send_probe_factory(self, device_id, device_name, metric):
+        def send_probe_factory(self, device_name, metric):
 
             def send_probe(body):
                 logging.debug("GOT: " + body)
                 buffer_content = json.loads(body)
 
                 for record in buffer_content:
-                    self.subscribers[device_id]\
-                        [device_name][metric]["total_records"] += 1
-                    record["device_id"] = device_id
+                    self.subscribers[device_name][metric]["total_records"] += 1
                     record["device_name"] = device_name
                     record["metric"] = metric
 
@@ -83,57 +84,52 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user,
 
         def handle_channel_subscription(self, stream_configuration):
             device_name = stream_configuration['deviceName']
-            device_id = stream_configuration['deviceId']
             metric = stream_configuration['metric']
-            downsampling_factor = stream_configuration.\
-                get('downsampling_factor', 16)
+            token = (stream_configuration['token']
+                     if 'token' in stream_configuration else None)
+            downsampling_factor = stream_configuration.get(
+                'downsampling_factor', 16)
             subscriber_id = str(uuid4())
 
-            if not self.metric_exists(device_id, device_name, metric):
-                self.subscribers[device_id][device_name][metric] = {
+            if not self.metric_exists(device_name, metric):
+                self.subscribers[device_name][metric] = {
                     "subscriber": TornadoSubscriber(
-                        callback=self.send_probe_factory(
-                            device_id, device_name, metric),
+                        callback=self.send_probe_factory(device_name, metric),
                         device_name=device_name,
-                        device_id=device_id,
                         rabbitmq_address=rabbitmq_address,
                         rabbitmq_user=rabbitmq_user,
                         rabbitmq_pwd=rabbitmq_pwd,
                         metric_name=metric,
-                        queue_name=subscriber_id),
+                        queue_name=subscriber_id,
+                        token=token
+                    ),
                     "downsampling_factor": downsampling_factor,
                     "total_records": 0
                 }
 
-                self.subscribers[device_id][device_name]\
-                    [metric]["subscriber"].connect()
+                self.subscribers[device_name][metric]["subscriber"].connect()
 
         def handle_channel_unsubscription(self, unsubscription_msg):
             device_name = unsubscription_msg['deviceName']
-            device_id = unsubscription_msg['deviceId']
             metric = unsubscription_msg['metric']
 
-            logging.info("Unsubscription received for device_id: %s, "
+            logging.info("Unsubscription received for "
                          "device_name: %s, metric: %s"
-                         % (device_id, device_name, metric))
-            if self.metric_exists(device_id, device_name, metric):
-                self.subscribers[device_id][device_name][metric]\
-                    ["subscriber"].disconnect()
+                         % (device_name, metric))
+            if self.metric_exists(device_name, metric):
+                self.subscribers[device_name][metric]["subscriber"].disconnect()
 
         def on_close(self):
             logging.info("Disconnecting client...")
-            for device_id in self.subscribers:
-                for device_name in self.subscribers[device_id]:
-                    for metric in self.subscribers[device_id][device_name]:
-                        subscriber = self.subscribers[device_id]\
-                            [device_name][metric]["subscriber"]
-                        if subscriber is not None:
-                            logging.info(
-                                "Disconnecting subscriber for device_id: %s, "
-                                "device_name: %s, "
-                                "metric: %s" % (device_id,
-                                                device_name, metric))
-                            subscriber.disconnect()
+            for device_name in self.subscribers:
+                for metric in self.subscribers[device_name]:
+                    subscriber = self.subscribers[device_name] \
+                        [metric]["subscriber"]
+                    if subscriber is not None:
+                        logging.info(
+                            "Disconnecting subscriber for device_name: %s, "
+                            "metric: %s" % (device_name, metric))
+                        subscriber.disconnect()
 
             self.subscribers = {}
             self.clients.remove(self)
@@ -142,11 +138,9 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user,
         def send_heartbeat(self):
             self.broadcast(self.clients, 'message')
 
-        def metric_exists(self, device_id, device_name, metric):
-            me = (self.subscribers.has_key(device_id)
-                  and self.subscribers[device_id].has_key(device_name)
-                  and self.subscribers[device_id][device_name].has_key(metric))
-            return me
+        def metric_exists(self, device_name, metric):
+            return (self.subscribers.has_key(device_name)
+                    and self.subscribers[device_name].has_key(metric))
 
     return RtStreamConnection
 
@@ -156,12 +150,10 @@ class TornadoSubscriber(object):
     See: https://pika.readthedocs.org/en/0.9.14/examples/tornado_consumer.html
     """
 
-    def __init__(self, callback, device_name, device_id, rabbitmq_address,
-                 rabbitmq_user,
-                 rabbitmq_pwd, metric_name, queue_name):
+    def __init__(self, callback, device_name, rabbitmq_address, rabbitmq_user,
+                 rabbitmq_pwd, metric_name, queue_name, token=None):
         self.callback = callback
         self.device_name = device_name
-        self.device_id = device_id
         self.metric_name = metric_name
 
         self.connection = None
@@ -171,14 +163,29 @@ class TornadoSubscriber(object):
         self.rabbitmq_user = rabbitmq_user
         self.rabbitmq_pwd = rabbitmq_pwd
         self.queue_name = queue_name
+        self.token = token
 
         self.consumer_tag = None
 
     def connect(self):
-        credentials = pika.PlainCredentials('cloudbrain', 'cloudbrain')
+        auth_url = os.environ.get("AUTH_URL", None)
+        auth = CloudbrainAuth(base_url=auth_url)
+        if self.token:
+            credentials = pika.PlainCredentials(self.token, '')
+            vhost = auth.get_vhost_by_token(self.token)
+            connection_params = pika.ConnectionParameters(
+                host=self.rabbitmq_address, virtual_host=vhost,
+                credentials=credentials)
+        else:
+            credentials = pika.PlainCredentials(self.rabbitmq_user,
+                                                self.rabbitmq_pwd)
+            vhost = getattr(self, 'rabbitmq_vhost',
+                            auth.get_vhost_by_username(self.rabbitmq_user))
+            connection_params = pika.ConnectionParameters(
+                host=self.rabbitmq_address, virtual_host=vhost,
+                credentials=credentials)
         self.connection = pika.adapters.tornado_connection.TornadoConnection(
-            pika.ConnectionParameters(
-                host=self.rabbitmq_address, credentials=credentials),
+            connection_params,
             self.on_connected,
             stop_ioloop_on_close=False,
             custom_ioloop=IOLoop.instance())
@@ -243,7 +250,7 @@ class TornadoSubscriber(object):
         self.callback(body)
 
     def get_key(self):
-        key = "%s:%s:%s" % (self.device_id, self.device_name, self.metric_name)
+        key = "%s:%s" % (self.device_name, self.metric_name)
         return key
 
 
