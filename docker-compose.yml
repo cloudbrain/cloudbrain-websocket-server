@@ -3,11 +3,11 @@ services:
   cbws:
     build: .
     container_name: "cbws"
-    command: python -m cbws.run --file examples/ws_server_config.docker.json
+    command: python -m cbws.run
     ports:
       - "31415:31415"
     env_file:
-      - '.env'
+      - '.env.docker'
     networks:
       - cloudbrain_network
 networks:
