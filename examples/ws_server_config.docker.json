@@ -1,6 +1,7 @@
 {
   "ws_server_port": 31415,
-  "rabbitmq_address": "dockerhost",
+  "rabbitmq_address": "rabbit",
   "rabbitmq_user": "",
-  "rabbitmq_pwd": ""
+  "rabbitmq_pwd": "",
+  "rabbitmq_vhost": "/"
 }

@@ -1,0 +1,15 @@
+version: "3.1"
+services:
+  cbws:
+    build: .
+    container_name: "cbws"
+    command: python -m cbws.run --file examples/ws_server_config.docker.json
+    ports:
+      - "31415:31415"
+    env_file:
+      - '.env'
+    networks:
+      - cloudbrain_network
+networks:
+  cloudbrain_network:
+    external: true
