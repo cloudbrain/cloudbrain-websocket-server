@@ -1,19 +1,23 @@
-# cloudbrain-websocket-server
-Websocket server module.
+# CloudBrain websocket server module.
 
 ## Setup
 ```
-cd cloudbrain-websocket-server/
-python setup.py install --user
+pip install . --user
 ```
-Or if you plan to modifiy the code
+Or if you plan to modify the code:
 ```
-python setup.py develop --user
+pip install -e . --user
 ```
 
 ## Run
 ```
-python cbws/run.py --conf /path/to/conf.json
+python -m cbws.run --file /path/to/conf.json
 ```
 
-See [default config file](https://github.com/cloudbrain/cloudbrain-websocket-server/blob/master/cbws/conf/ws_server_config.json)
+See [default config file](https://github.com/cloudbrain/cloudbrain-websocket-server/blob/master/examples/ws_server_config.json)
+
+## Docker
+```
+docker build -t cbws .
+docker run -it -e PORT=31415 -e AUTH_URL=localhost -e RABBITMQ_ADDRESS=localhost -e RABBITMQ_USER=guest -e RABBITMQ_PWD=guest cbws
+```

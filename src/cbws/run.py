@@ -13,23 +13,21 @@ class _CommandLineArgError(Exception):
     pass
 
 
-
 class _Options(object):
     """Options returned by _parseArgs"""
 
-
-    def __init__(self, config, log_level):
+    def __init__(self, conf_file, log_level):
         """
-        :param str config: path to JSON config file.
-        :param str log_level: logger verbosity 'info' for logging.INFO or 'debug' for logging.DEBUG.
+        :param config: (str) path to JSON config file.
+        :param log_level: (str) logger verbosity 'info' for logging.INFO 
+            or 'debug' for logging.DEBUG.
         """
-        self.config = config
+        self.conf_file = conf_file
 
         if log_level == 'info':
             self.log_level = logging.INFO
         elif log_level == 'debug':
             self.log_level = logging.DEBUG
-
 
 
 def _parseArgs():
@@ -42,10 +40,11 @@ def _parseArgs():
     parser = ArgumentParser(description="Start CloudBrain websocket server.")
 
     parser.add_argument(
-        "--conf",
+        "--file",
         type=str,
-        dest="config",
-        help="REQUIRED: path to JSON config file.")
+        default=None,
+        dest="conf_file",
+        help="Path to JSON config file.")
 
     parser.add_argument(
         "--log",
@@ -57,8 +56,7 @@ def _parseArgs():
 
     options = parser.parse_args()
 
-    return _Options(config=options.config, log_level=options.log_level)
-
+    return _Options(conf_file=options.conf_file, log_level=options.log_level)
 
 
 def run(config_file, log_level):
@@ -67,7 +65,7 @@ def run(config_file, log_level):
 
     config = {}
     if config_file:
-    	with open(config_file, 'rb') as f:
+        with open(config_file, 'rb') as f:
             config = json.load(f)
     
     port = os.environ.get("PORT", None) or config['ws_server_port']
@@ -90,9 +88,10 @@ def run(config_file, log_level):
 def main():
     try:
         options = _parseArgs()
-        run(options.config, options.log_level)
+        run(options.conf_file, options.log_level)
     except Exception as ex:
         logging.exception("Wesocket server failed")
+
 
 if __name__ == '__main__':
     main()
