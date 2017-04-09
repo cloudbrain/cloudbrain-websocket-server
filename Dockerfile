@@ -11,7 +11,7 @@ RUN pip install . --user
 
 ADD . /app
 WORKDIR /app
-RUN pip install . --user
+RUN pip install -e . --user
 
 # Don't specify a path to JSON conf file. Use environment variables instead.
 # Env variables to set:
