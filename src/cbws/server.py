@@ -19,12 +19,12 @@ _LOGGER.setLevel(logging.INFO)
 recursivedict = lambda: defaultdict(recursivedict)
 
 
-def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user,
-                                  rabbitmq_pwd):
+def _rt_stream_connection_factory(rabbitmq_address, rabbit_auth_url):
     """
     RtStreamConnection class factory.
 
-    :param rabbitmq_address: RabbitMQ server address
+    :param rabbitmq_address: RabbitMQ server address.
+    :param rabbit_auth_url: RabbitMQ authentication server address.
     :return: RtStreamConnection
     """
 
@@ -62,13 +62,13 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user,
         def on_message(self, message):
             """
             This will receive instructions from the client to change the
-            stream. After the connection is established we expect to receive a 
-            JSON with deviceName, deviceId, metric; then we subscribe to 
+            stream. After the connection is established we expect to receive a
+            JSON with deviceName, deviceId, metric; then we subscribe to
             RabbitMQ and tart streaming the data.
 
-            NOTE: it's not possible to open multiple connections from the same 
-            client. so in case we need to stream different devices/metrics/etc. 
-            at the same time, we need to use a solution that is like the 
+            NOTE: it's not possible to open multiple connections from the same
+            client. so in case we need to stream different devices/metrics/etc.
+            at the same time, we need to use a solution that is like the
             multiplexing in the sockjs-tornado examples folder.
 
             :param message: subscription message to process
@@ -85,19 +85,34 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbitmq_user,
         def handle_channel_subscription(self, stream_configuration):
             device_name = stream_configuration['deviceName']
             metric = stream_configuration['metric']
+            subscriber_id = str(uuid4())
+            # Look for a token.
             token = (stream_configuration['token']
                      if 'token' in stream_configuration else None)
-            subscriber_id = str(uuid4())
+            # If there is a token, use it in place of rabbitmq user and pwd.
+            if token:
+                rabbitmq_user = token
+                rabbitmq_pwd = ""
+            elif ('user' in stream_configuration
+                  and 'password' in stream_configuration):
+                rabbitmq_user = stream_configuration['user']
+                rabbitmq_pwd = stream_configuration['password']
+            else:
+                raise ValueError('Missing parameters in subscribe message '
+                                 'to websocket server. You muse either pass '
+                                 'the param "token" OR two params: '
+                                 '"username" and "password".')
 
             if not self.metric_exists(device_name, metric):
                 self.subscribers[device_name][metric] = {
                     "subscriber": TornadoSubscriber(
                         callback=self.send_probe_factory(device_name, metric),
                         device_name=device_name,
+                        metric_name=metric,
+                        rabbit_auth_url=rabbit_auth_url,
                         rabbitmq_address=rabbitmq_address,
                         rabbitmq_user=rabbitmq_user,
                         rabbitmq_pwd=rabbitmq_pwd,
-                        metric_name=metric,
                         queue_name=subscriber_id,
                         token=token
                     ),
@@ -147,14 +162,15 @@ class TornadoSubscriber(object):
     See: https://pika.readthedocs.org/en/0.9.14/examples/tornado_consumer.html
     """
 
-    def __init__(self, callback, device_name, rabbitmq_address, rabbitmq_user,
-                 rabbitmq_pwd, metric_name, queue_name, token=None):
+    def __init__(self, callback, device_name, metric_name, rabbit_auth_url,
+                 rabbitmq_address, rabbitmq_user, rabbitmq_pwd,
+                 queue_name, token=None):
+
         self.callback = callback
         self.device_name = device_name
         self.metric_name = metric_name
 
-        self.connection = None
-        self.channel = None
+        self.rabbit_auth_url = rabbit_auth_url
 
         self.rabbitmq_address = rabbitmq_address
         self.rabbitmq_user = rabbitmq_user
@@ -162,11 +178,12 @@ class TornadoSubscriber(object):
         self.queue_name = queue_name
         self.token = token
 
+        self.connection = None
+        self.channel = None
         self.consumer_tag = None
 
     def connect(self):
-        auth_url = os.environ.get("AUTH_URL", None)
-        auth = CloudbrainAuth(base_url=auth_url)
+        auth = CloudbrainAuth(self.rabbit_auth_url)
         if self.token:
             credentials = pika.PlainCredentials(self.token, '')
             vhost = auth.get_vhost_by_token(self.token)
@@ -252,18 +269,14 @@ class TornadoSubscriber(object):
 
 
 class WebsocketServer(object):
-    def __init__(self, ws_server_port, rabbitmq_address, rabbitmq_user,
-                 rabbitmq_pwd):
+    def __init__(self, ws_server_port, rabbitmq_address, rabbit_auth_url):
         self.rabbitmq_address = rabbitmq_address
-        self.rabbitmq_user = rabbitmq_user
-        self.rabbitmq_pwd = rabbitmq_pwd
         self.ws_server_port = ws_server_port
+        self.rabbit_auth_url = rabbit_auth_url
 
     def start(self):
         RtStreamConnection = _rt_stream_connection_factory(
-            self.rabbitmq_address,
-            self.rabbitmq_user,
-            self.rabbitmq_pwd)
+            self.rabbitmq_address, self.rabbit_auth_url)
 
         # 1. Create chat router
         RtStreamRouter = SockJSRouter(RtStreamConnection, '/rt-stream')
@@ -274,8 +287,8 @@ class WebsocketServer(object):
         # 3. Make Tornado app listen on Pi
         app.listen(self.ws_server_port)
 
-        print "Real-time data server running at " \
-              "http://localhost:%s" % self.ws_server_port
+        print("Real-time data server running at "
+              "http://localhost:%s" % self.ws_server_port)
 
         # 4. Start IOLoop
         IOLoop.instance().start()
