@@ -19,7 +19,7 @@ class _Options(object):
     def __init__(self, conf_file, log_level):
         """
         :param config: (str) path to JSON config file.
-        :param log_level: (str) logger verbosity 'info' for logging.INFO 
+        :param log_level: (str) logger verbosity 'info' for logging.INFO
             or 'debug' for logging.DEBUG.
         """
         self.conf_file = conf_file
@@ -63,20 +63,20 @@ def run(config_file, log_level):
 
     logging.basicConfig(level=log_level)
 
-    config = {}
     if config_file:
         with open(config_file, 'rb') as f:
             config = json.load(f)
-    
-    port = os.environ.get("PORT", None) or config['ws_server_port']
-    rabbitmq_address = os.environ.get("RABBITMQ_ADDRESS", None) or config['rabbitmq_address']
-    rabbitmq_user = os.environ.get("RABBITMQ_USER", None) or config['rabbitmq_user']
-    rabbitmq_pwd = os.environ.get("RABBITMQ_PWD", None) or config['rabbitmq_pwd']
+            ws_port = config['ws_server_port']
+        rabbitmq_address = config['rabbitmq_address']
+        rabbit_auth_url = config['rabbit_auth_url']
+    else:
+        ws_port = os.environ.get("WS_PORT")
+        rabbitmq_address = os.environ.get("RABBITMQ_ADDRESS")
+        rabbit_auth_url = os.environ.get("RABBIT_AUTH_URL")
 
-    server = WebsocketServer(ws_server_port=port,
+    server = WebsocketServer(ws_server_port=ws_port,
                              rabbitmq_address=rabbitmq_address,
-                             rabbitmq_user=rabbitmq_user,
-                             rabbitmq_pwd=rabbitmq_pwd)
+                             rabbit_auth_url=rabbit_auth_url)
     try:
         server.start()
         while 1:
