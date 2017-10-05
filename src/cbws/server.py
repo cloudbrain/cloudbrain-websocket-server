@@ -1,7 +1,6 @@
 import pika
 import json
 import logging
-import os
 
 from collections import defaultdict
 from sockjs.tornado.conn import SockJSConnection
@@ -40,18 +39,31 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbit_auth_url):
             self.subscribers = recursivedict()
             self.total_records = recursivedict()
 
-        def send_probe_factory(self, device_name, metric):
+        def send_probe_factory(self, exchange_name, routing_key):
 
             def send_probe(body):
                 logging.debug("GOT: " + body)
                 buffer_content = json.loads(body)
 
-                for record in buffer_content:
-                    self.subscribers[device_name][metric]["total_records"] += 1
-                    record["device_name"] = device_name
-                    record["metric"] = metric
 
-                    self.send(json.dumps(record))
+                # FIXME: Keep old buffer parsing for backward compatibility.
+                if type(buffer_content) == list:
+                    for record in buffer_content:
+                        self.subscribers[exchange_name][routing_key] \
+                            ["total_records"] += 1
+                        record["exchangeName"] = exchange_name
+                        record["routingKey"] = routing_key
+                        self.send(json.dumps(record))
+                # FIXME: This is the new data format. Keep this parsing.
+                elif type(buffer_content) == dict:
+                    for record in buffer_content['chunk']:
+                        self.subscribers[exchange_name][routing_key] \
+                            ["total_records"] += 1
+                        record["exchangeName"] = exchange_name
+                        record["routingKey"] = routing_key
+                        self.send(json.dumps(record))
+
+
 
             return send_probe
 
@@ -63,8 +75,8 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbit_auth_url):
             """
             This will receive instructions from the client to change the
             stream. After the connection is established we expect to receive a
-            JSON with deviceName, deviceId, metric; then we subscribe to
-            RabbitMQ and tart streaming the data.
+            JSON with exchangeName, routingKey, token; then we subscribe to
+            RabbitMQ and start streaming the data.
 
             NOTE: it's not possible to open multiple connections from the same
             client. so in case we need to stream different devices/metrics/etc.
@@ -83,9 +95,9 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbit_auth_url):
                 self.handle_channel_unsubscription(msg_dict)
 
         def handle_channel_subscription(self, stream_configuration):
-            device_name = stream_configuration['deviceName']
-            metric = stream_configuration['metric']
-            subscriber_id = str(uuid4())
+            exchange_name = stream_configuration['exchangeName']
+            routing_key = stream_configuration['routingKey']
+            queue_name = 'websocket-client-%s' % str(uuid4())
             # Look for a token.
             token = (stream_configuration['token']
                      if 'token' in stream_configuration else None)
@@ -93,6 +105,7 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbit_auth_url):
             if token:
                 rabbitmq_user = token
                 rabbitmq_pwd = ""
+            # Otherwise, look for a username and password.
             elif ('user' in stream_configuration
                   and 'password' in stream_configuration):
                 rabbitmq_user = stream_configuration['user']
@@ -103,44 +116,47 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbit_auth_url):
                                  'the param "token" OR two params: '
                                  '"username" and "password".')
 
-            if not self.metric_exists(device_name, metric):
-                self.subscribers[device_name][metric] = {
+            if not self.routing_key_exists(exchange_name, routing_key):
+                self.subscribers[exchange_name][routing_key] = {
                     "subscriber": TornadoSubscriber(
-                        callback=self.send_probe_factory(device_name, metric),
-                        device_name=device_name,
-                        metric_name=metric,
+                        callback=self.send_probe_factory(
+                            exchange_name, routing_key),
+                        exchange_name=exchange_name,
+                        routing_key=routing_key,
                         rabbit_auth_url=rabbit_auth_url,
                         rabbitmq_address=rabbitmq_address,
                         rabbitmq_user=rabbitmq_user,
                         rabbitmq_pwd=rabbitmq_pwd,
-                        queue_name=subscriber_id,
+                        queue_name=queue_name,
                         token=token
                     ),
                     "total_records": 0
                 }
 
-                self.subscribers[device_name][metric]["subscriber"].connect()
+                self.subscribers[exchange_name] \
+                    [routing_key]["subscriber"].connect()
 
         def handle_channel_unsubscription(self, unsubscription_msg):
-            device_name = unsubscription_msg['deviceName']
-            metric = unsubscription_msg['metric']
+            exchange_name = unsubscription_msg['exchangeName']
+            routing_key = unsubscription_msg['routingKey']
 
             logging.info("Unsubscription received for "
-                         "device_name: %s, metric: %s"
-                         % (device_name, metric))
-            if self.metric_exists(device_name, metric):
-                self.subscribers[device_name][metric]["subscriber"].disconnect()
+                         "exchange_name: %s, routing_key: %s"
+                         % (exchange_name, routing_key))
+            if self.routing_key_exists(exchange_name, routing_key):
+                self.subscribers[exchange_name][routing_key] \
+                    ["subscriber"].disconnect()
 
         def on_close(self):
             logging.info("Disconnecting client...")
-            for device_name in self.subscribers:
-                for metric in self.subscribers[device_name]:
-                    subscriber = self.subscribers[device_name] \
-                        [metric]["subscriber"]
+            for exchange_name in self.subscribers:
+                for routing_key in self.subscribers[exchange_name]:
+                    subscriber = self.subscribers[exchange_name] \
+                        [routing_key]["subscriber"]
                     if subscriber is not None:
                         logging.info(
-                            "Disconnecting subscriber for device_name: %s, "
-                            "metric: %s" % (device_name, metric))
+                            "Disconnecting subscriber for exchange_name: %s, "
+                            "routing_key: %s" % (exchange_name, routing_key))
                         subscriber.disconnect()
 
             self.subscribers = {}
@@ -150,9 +166,9 @@ def _rt_stream_connection_factory(rabbitmq_address, rabbit_auth_url):
         def send_heartbeat(self):
             self.broadcast(self.clients, 'message')
 
-        def metric_exists(self, device_name, metric):
-            return (self.subscribers.has_key(device_name)
-                    and self.subscribers[device_name].has_key(metric))
+        def routing_key_exists(self, exchange_name, routing_key):
+            return (self.subscribers.has_key(exchange_name)
+                    and self.subscribers[exchange_name].has_key(routing_key))
 
     return RtStreamConnection
 
@@ -162,13 +178,13 @@ class TornadoSubscriber(object):
     See: https://pika.readthedocs.org/en/0.9.14/examples/tornado_consumer.html
     """
 
-    def __init__(self, callback, device_name, metric_name, rabbit_auth_url,
+    def __init__(self, callback, exchange_name, routing_key, rabbit_auth_url,
                  rabbitmq_address, rabbitmq_user, rabbitmq_pwd,
                  queue_name, token=None):
 
         self.callback = callback
-        self.device_name = device_name
-        self.metric_name = metric_name
+        self.exchange_name = exchange_name
+        self.routing_key = routing_key
 
         self.rabbit_auth_url = rabbit_auth_url
 
@@ -219,7 +235,8 @@ class TornadoSubscriber(object):
         self.channel = None
 
     def on_backpressure_callback(self, connection):
-        logging.info("******** Backpressure detected for %s" % self.get_key())
+        logging.info("******** Backpressure detected for exchange %s and "
+                     "routing key %s" % (self.exchange_name, self.routing_key))
 
     def open_channel(self):
         self.connection.channel(self.on_channel_open)
@@ -227,11 +244,20 @@ class TornadoSubscriber(object):
     def on_channel_open(self, channel):
         self.channel = channel
         self.channel.add_on_close_callback(self.on_channel_closed)
-        logging.info("Declaring exchange: %s" % self.get_key())
-        self.channel.exchange_declare(self.on_exchange_declareok,
-                                      exchange=self.get_key(),
-                                      type='direct',
-                                      passive=True)
+        logging.info("Declaring exchange: %s" % self.exchange_name)
+
+        if self.exchange_name == 'amq.topic':
+            # Note: this is the reserved excahnge name for MQTT. Therefore,
+            # "type" must be "topic" and "durable" must be set to "True".
+            self.channel.exchange_declare(self.on_exchange_declareok,
+                                          exchange=self.exchange_name,
+                                          type='topic',
+                                          durable=True)
+        else:
+            self.channel.exchange_declare(self.on_exchange_declareok,
+                                          exchange=self.exchange_name,
+                                          type='direct',
+                                          passive=True)
 
     def on_channel_closed(self, channel, reply_code, reply_text):
         self.connection.close()
@@ -239,15 +265,16 @@ class TornadoSubscriber(object):
     def on_exchange_declareok(self, unused_frame):
         self.channel.queue_declare(self.on_queue_declareok,
                                    self.queue_name,
-                                   exclusive=True, )
+                                   exclusive=True)
 
     def on_queue_declareok(self, unused_frame):
-        logging.info("Binding queue: " + self.get_key())
+        logging.info("Binding queue. Exchange name: %s. Routing key: %s"
+                     % (self.exchange_name, self.routing_key))
         self.channel.queue_bind(
             self.on_bindok,
-            exchange=self.get_key(),
+            exchange=self.exchange_name,
             queue=self.queue_name,
-            routing_key=self.get_key())
+            routing_key=self.routing_key)
 
     def on_bindok(self, unused_frame):
         self.channel.add_on_cancel_callback(self.on_consumer_cancelled)
@@ -262,10 +289,6 @@ class TornadoSubscriber(object):
 
     def on_message(self, unused_channel, basic_deliver, properties, body):
         self.callback(body)
-
-    def get_key(self):
-        key = "%s:%s" % (self.device_name, self.metric_name)
-        return key
 
 
 class WebsocketServer(object):
